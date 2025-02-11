@@ -22,7 +22,7 @@ var (
 	key              string
 )
 
-var printWriter io.Writer = os.Stderr
+var printWriter io.Writer = os.Stdout
 
 func printf(format string, args ...interface{}) {
 	_, _ = fmt.Fprintf(printWriter, format, args...)
@@ -34,21 +34,21 @@ var printUsage = func() {
 	printf("Usage: %s [options] [URL]\n\n", os.Args[0])
 	printf("\t[URL] can be a pastila URL or \"-\" to read from URL stdin.\n\nAvailable options:\n\n")
 	flag.PrintDefaults()
-	printf("\nRead data goes into output, anything else goes into printf\n")
-	printf("When writing to pastila, URL will be printed to output\n")
+	printf("\nRead data goes into output, anything else goes into stderr.\n")
+	printf("When writing to pastila, URL will be printed to stdout.\n")
 }
 
 func init() {
-	flag.StringVar(&fileName, "f", "", "Content file path")
+	flag.StringVar(&fileName, "f", "", "Content file path. Use \"-\" to read from stdin. If not provided, content will be read from stdin.")
 
 	flag.BoolVar(&plain, "plain", false, "Do not encrypt content. Default is to encrypt content.")
 	flag.StringVar(&key, "key", "", "Key to encrypt content. Provide a file path to read key from a file.  If not provided, a random 64bit key will be generated.")
 
 	flag.BoolVar(&showSummary, "s", false, "Show query summary after reading from pastila")
 
-	flag.BoolVar(&launchEditorFlag, "e", false, "Launch editor to write content. If URL is provided, editor will be launched after reading from pastila. Use EDITOR environment variable to set editor. Otherwise, vi will be used.")
+	flag.BoolVar(&launchEditorFlag, "e", false, "Launch editor to write content. If URL is provided, editor will be launched with a content read from pastila. Use EDITOR environment variable to set editor. Otherwise, vi will be used.")
 
-	flag.BoolVar(&teeFlag, "teeFlag", false, "Write to output and to pastila. URL will be printed to printf")
+	flag.BoolVar(&teeFlag, "teeFlag", false, "Write to output and to pastila. URL will be printed to stderr.")
 }
 
 func stdinIfAvailable() *os.File {
@@ -74,15 +74,18 @@ func main() {
 	var err error
 
 	urlToRead := flag.Arg(0)
-	contentToWrite := stdinIfAvailable()
 
-	if fileName != "" {
-		contentToWrite, err = os.Open(fileName)
+	var contentReader io.ReadCloser
+
+	if fileName != "" && fileName != "-" {
+		contentReader, err = os.Open(fileName)
 		if err != nil {
 			printf("Failed to open file %s: %v\n", fileName, err)
 			os.Exit(1)
 		}
-		defer contentToWrite.Close()
+		defer contentReader.Close()
+	} else {
+		contentReader = stdinIfAvailable()
 	}
 
 	service := pastila.Service{
@@ -92,7 +95,7 @@ func main() {
 
 	// If no URL is provided,
 	// we write to pastila
-	if urlToRead == "" && contentToWrite == nil {
+	if urlToRead == "" && contentReader == nil {
 		printUsage()
 		os.Exit(1)
 	}
@@ -136,8 +139,9 @@ func main() {
 		return
 	}
 
-	var reader io.Reader = contentToWrite
+	var reader io.Reader = contentReader
 	if teeFlag {
+		printWriter = os.Stderr
 		reader = io.TeeReader(reader, os.Stdout)
 	}
 
@@ -169,8 +173,6 @@ func main() {
 	}
 
 	printf("%s\n", result.URL)
-
-	// todo: editable paste. This requires paste ReadCloser to be Seekable as well
 }
 
 func editPaste(service pastila.Service, paste *pastila.Paste) *pastila.Paste {
@@ -202,11 +204,21 @@ func editPaste(service pastila.Service, paste *pastila.Paste) *pastila.Paste {
 		os.Exit(1)
 	}
 
+	currentPrintWriter := printWriter
 	printBuffer := &bytes.Buffer{}
 	printWriter = printBuffer
+	dismissPrintBuffer := func() {
+		if printBuffer == nil {
+			return
+		}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	fileWatchDone := watchFile(ctx, editorFile, func(_ os.FileInfo) {
+		printWriter = currentPrintWriter
+		_, _ = io.Copy(printWriter, printBuffer)
+		printBuffer = nil
+	}
+
+	fileWatchCtx, cancelFileWatch := context.WithCancel(context.Background())
+	fileWatchDone := watchFile(fileWatchCtx, editorFile, func(_ os.FileInfo) {
 		if _, err := editorFile.Seek(0, io.SeekStart); err != nil {
 			printf("Failed to seek to the beginning of the file: %v\n", err)
 			return
@@ -222,11 +234,7 @@ func editPaste(service pastila.Service, paste *pastila.Paste) *pastila.Paste {
 	})
 
 	go func() {
-		defer func() {
-			printWriter = os.Stderr
-			_, _ = io.Copy(os.Stderr, printBuffer)
-			printBuffer = nil
-		}()
+		defer dismissPrintBuffer()
 
 		if err := cmd.Wait(); err != nil {
 			printf("Failed to wait for editor: %v\n", err)
@@ -239,6 +247,8 @@ func editPaste(service pastila.Service, paste *pastila.Paste) *pastila.Paste {
 			// There are editors like "code" (VSCode launcher) that immediately exit
 			// leaving forked process running in background.
 			if cmd.ProcessState.ExitCode() == 0 && time.Now().Sub(processStartAt) < 1*time.Second {
+				dismissPrintBuffer()
+
 				printf("Your editor exited too quickly. Does it run in background? Press any key to continue\n")
 				_, _ = os.Stdin.Read(make([]byte, 1))
 			}
@@ -247,7 +257,7 @@ func editPaste(service pastila.Service, paste *pastila.Paste) *pastila.Paste {
 		}
 	}
 
-	cancel()
+	cancelFileWatch()
 	<-fileWatchDone
 	return paste
 }
@@ -274,24 +284,29 @@ func watchFile(ctx context.Context, f *os.File, changeHandler func(os.FileInfo))
 			return
 		}
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
+		execChangeHandlerIfFileChanged := func() {
 			actualStat, err := f.Stat()
 			if err != nil {
 				return
 			}
 
 			if actualStat.Size() == 0 || actualStat.Size() == stat.Size() || actualStat.ModTime() == stat.ModTime() {
-				continue
+				return
 			}
 
 			stat = actualStat
 			changeHandler(stat)
+		}
+
+		for {
+			select {
+			case <-ctx.Done():
+				execChangeHandlerIfFileChanged()
+				return
+			default:
+			}
+
+			execChangeHandlerIfFileChanged()
 		}
 	}()
 	return done

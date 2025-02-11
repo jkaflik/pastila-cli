@@ -6,6 +6,7 @@ import (
 	"crypto/cipher"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"github.com/frifox/siphash128"
 	"io"
@@ -15,16 +16,16 @@ import (
 
 var HTTPClient = http.DefaultClient
 var DefaultClickHouseURL = "https://play.clickhouse.com/?user=paste"
-var DefaultPastilaURL = "https://pastila.nl/"
+var chURL = "https://pastila.nl/"
 
 var (
 	ErrInvalidUrl  = fmt.Errorf("invalid pastila url")
-	ErrNotFound    = fmt.Errorf("data not found")
+	ErrNotFound    = fmt.Errorf("pastila not found")
 	ErrKeyRequired = fmt.Errorf("key is required for encrypted data")
 	ErrInvalidKey  = fmt.Errorf("invalid key")
 )
 
-var QueryMatchRegex = regexp.MustCompile(`([a-f0-9]+)/([a-f0-9]+)(?:#(.+))?$`)
+var QueryMatchRegex = regexp.MustCompile(`(?m)([a-f0-9]+)/([a-f0-9]+)(?:#(.+))?$`)
 
 type Paste struct {
 	io.ReadCloser
@@ -67,7 +68,7 @@ func (s *Service) Read(url string) (*Paste, error) {
 		}
 	}
 
-	req, err := s.clickHouseRequest(requestDataQuery, nil)
+	req, err := s.clickHouseRequest(selectDataQuery, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ClickHouse request: %w", err)
 	}
@@ -81,14 +82,15 @@ func (s *Service) Read(url string) (*Paste, error) {
 		return nil, fmt.Errorf("failed to execute ClickHouse request: %w", err)
 	}
 
-	buf := make([]byte, 2)
-	_, err = res.Body.Read(buf)
-	if err != nil {
+	defer res.Body.Close()
+
+	var row selectRow
+	if err := json.NewDecoder(res.Body).Decode(&row); err != nil {
 		if err == io.EOF {
-			return nil, fmt.Errorf("%w for calcFingerprint %s and hash %s", ErrNotFound, fingerprintHex, hashHex)
+			return nil, fmt.Errorf("%w: %s", ErrNotFound, url)
 		}
 
-		return nil, fmt.Errorf("failed to read ClickHouse response: %w", err)
+		return nil, fmt.Errorf("failed to decode ClickHouse response: %w", err)
 	}
 
 	fingerprint, err := hex.DecodeString(fingerprintHex)
@@ -101,34 +103,30 @@ func (s *Service) Read(url string) (*Paste, error) {
 	}
 
 	// data is not encrypted, return as is
-	if buf[0] == '0' {
+	if !row.Encrypted {
 		return &Paste{
 			URL:         url,
 			Key:         key,
 			Fingerprint: fingerprint,
 			Hash:        hash,
-			ReadCloser:  res.Body,
+			ReadCloser:  io.NopCloser(bytes.NewBufferString(row.Content)),
 			QueryID:     res.Header.Get("X-ClickHouse-Query-Id"),
 		}, nil
 	}
 
-	defer res.Body.Close()
-
 	if len(key) == 0 {
 		return nil, ErrKeyRequired
+	}
+
+	ciphertext, err := base64.StdEncoding.DecodeString(row.Content)
+	if err != nil {
+		return nil, fmt.Errorf("%w, failed to decode base64 ciphertext: %w", ErrInvalidKey, err)
 	}
 
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, fmt.Errorf("%w, failed to create AES cipher: %w", ErrInvalidKey, err)
 	}
-
-	decoder := base64.NewDecoder(base64.StdEncoding, res.Body)
-	ciphertext, err := io.ReadAll(decoder)
-	if err != nil {
-		return nil, fmt.Errorf("%w, failed to read ciphertext: %w", ErrInvalidKey, err)
-	}
-
 	iv := make([]byte, aes.BlockSize)
 	plaintext := make([]byte, len(ciphertext))
 	cipher.NewCTR(block, iv).XORKeyStream(plaintext, ciphertext)
@@ -143,8 +141,22 @@ func (s *Service) Read(url string) (*Paste, error) {
 	}, nil
 }
 
-const requestDataQuery = `SELECT is_encrypted, content FROM data WHERE fingerprint = reinterpretAsUInt32(unhex({fingerprintHex:String})) AND hash = reinterpretAsUInt128(unhex({hashHex:String})) ORDER BY time LIMIT 1 FORMAT Raw`
-const insertDataQuery = `INSERT INTO data (hash_hex, fingerprint_hex, prev_hash_hex, prev_fingerprint_hex, is_encrypted, content) FORMAT Raw`
+const selectDataQuery = `SELECT toBool(is_encrypted) as is_encrypted, content FROM data WHERE fingerprint = reinterpretAsUInt32(unhex({fingerprintHex:String})) AND hash = reinterpretAsUInt128(unhex({hashHex:String})) ORDER BY time LIMIT 1 FORMAT JSONEachRow`
+const insertDataQuery = `INSERT INTO data (hash_hex, fingerprint_hex, prev_hash_hex, prev_fingerprint_hex, is_encrypted, content) FORMAT JSONEachRow`
+
+type selectRow struct {
+	Encrypted bool   `json:"is_encrypted"`
+	Content   string `json:"content"`
+}
+
+type insertRow struct {
+	Encrypted          bool   `json:"is_encrypted"`
+	Content            string `json:"content"`
+	HashHex            string `json:"hash_hex"`
+	FingerprintHex     string `json:"fingerprint_hex"`
+	PrevHashHex        string `json:"prev_hash_hex"`
+	PrevFingerprintHex string `json:"prev_fingerprint_hex"`
+}
 
 type writeOptions struct {
 	key                 []byte
@@ -178,9 +190,10 @@ func (s *Service) Write(input io.Reader, opt ...WriteOption) (*Paste, error) {
 		o(opts)
 	}
 
-	content, err := io.ReadAll(input)
+	var isEncrypted bool
+	var content string
+	b, err := io.ReadAll(input)
 
-	var isEncrypted = []byte{'0'}
 	if opts.key != nil {
 		block, err := aes.NewCipher(opts.key)
 		if err != nil {
@@ -189,30 +202,30 @@ func (s *Service) Write(input io.Reader, opt ...WriteOption) (*Paste, error) {
 
 		iv := make([]byte, aes.BlockSize)
 		stream := cipher.NewCTR(block, iv)
-		encrypted := make([]byte, len(content))
-		stream.XORKeyStream(encrypted, content)
+		encrypted := make([]byte, len(b))
+		stream.XORKeyStream(encrypted, b)
 
-		content = encrypted
-		isEncrypted = []byte{'1'}
+		content = base64.StdEncoding.EncodeToString(encrypted)
+		isEncrypted = true
+	} else {
+		content = string(b)
 	}
 
-	hash := siphash128.SipHash128(content)
+	hash := siphash128.SipHash128([]byte(content))
 	fingerprint := bytes.Repeat([]byte{0xff}, 4)
 
 	var buf bytes.Buffer
 
-	separator := []byte{'\t'}
-	buf.WriteString(fmt.Sprintf("%x", hash))
-	buf.Write(separator)
-	buf.WriteString(fmt.Sprintf("%x", fingerprint))
-	buf.Write(separator)
-	buf.WriteString(fmt.Sprintf("%x", opts.previousHash))
-	buf.Write(separator)
-	buf.WriteString(fmt.Sprintf("%x", opts.previousFingerprint))
-	buf.Write(separator)
-	buf.Write(isEncrypted)
-	buf.Write(separator)
-	buf.Write(content)
+	if err := json.NewEncoder(&buf).Encode(insertRow{
+		Encrypted:          isEncrypted,
+		Content:            content,
+		HashHex:            hex.EncodeToString(hash[:]),
+		FingerprintHex:     hex.EncodeToString(fingerprint),
+		PrevHashHex:        hex.EncodeToString(opts.previousHash),
+		PrevFingerprintHex: hex.EncodeToString(opts.previousFingerprint),
+	}); err != nil {
+		return nil, fmt.Errorf("failed to encode insert row: %w", err)
+	}
 
 	req, err := s.clickHouseRequest(insertDataQuery, &buf)
 	if err != nil {
@@ -232,7 +245,7 @@ func (s *Service) Write(input io.Reader, opt ...WriteOption) (*Paste, error) {
 
 	pastilaURL := s.PastilaURL
 	if pastilaURL == "" {
-		pastilaURL = DefaultPastilaURL
+		pastilaURL = chURL
 	}
 
 	return &Paste{

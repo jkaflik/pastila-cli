@@ -30,7 +30,7 @@ func TestReadUnencrypted(t *testing.T) {
 	require.NoError(t, r.Close())
 	require.NoError(t, err)
 
-	assert.Equal(t, "Hello ClickHouse! unencrypted :(\n", string(actualContent))
+	assert.Equal(t, "Hello ClickHouse! unencrypted :(", string(actualContent))
 }
 
 func TestReadInvalidKey(t *testing.T) {
@@ -47,25 +47,39 @@ func TestReadInvalidUrlPath(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidUrl)
 }
 
-func TestWriteUnencrypted(t *testing.T) {
-	DefaultPastilaURL = chtest.EnsureClickHouseInstance(t)
-	service := &Service{ClickHouseURL: DefaultPastilaURL, PastilaURL: "http://mylocal.pastila.nl/"}
+func ensureLocalService(t *testing.T) *Service {
+	chURL = chtest.EnsureClickHouseInstance(t)
+	return &Service{ClickHouseURL: chURL, PastilaURL: "http://mylocal.pastila.nl/"}
+}
 
-	url, err := service.Write(bytes.NewBufferString("Hello ClickHouse!"))
+func TestWriteUnencrypted(t *testing.T) {
+	const expectedContent = "Hello ClickHouse!"
+
+	service := ensureLocalService(t)
+
+	paste, err := service.Write(bytes.NewBufferString(expectedContent))
 
 	require.NoError(t, err)
-	assert.NotEmpty(t, url.QueryID)
-	assert.Equal(t, "http://mylocal.pastila.nl/?ffffffff/fa052372d3a8a5ee87eda55a42ac2338", url.URL)
+	assert.NotEmpty(t, paste.QueryID)
+	assert.Equal(t, service.PastilaURL+"?ffffffff/fa052372d3a8a5ee87eda55a42ac2338", paste.URL)
+
+	paste, err = service.Read(paste.URL)
+	require.NoError(t, err)
+
+	actualContent, err := io.ReadAll(paste)
+	require.NoError(t, paste.Close())
+	require.NoError(t, err)
+
+	assert.Equal(t, expectedContent, string(actualContent))
 }
 
 func TestWriteEncryptedOwnKey(t *testing.T) {
-	DefaultPastilaURL = chtest.EnsureClickHouseInstance(t)
-	service := &Service{ClickHouseURL: DefaultPastilaURL, PastilaURL: "http://mylocal.pastila.nl/"}
+	service := ensureLocalService(t)
 
 	key := bytes.Repeat([]byte{0x01}, 16)
 	url, err := service.Write(bytes.NewBufferString("Hello ClickHouse!"), WithKey(key))
 
 	require.NoError(t, err)
 	assert.NotEmpty(t, url.QueryID)
-	assert.Equal(t, "http://mylocal.pastila.nl/?ffffffff/bf4b6a128f333a6ebfb67a5c371c38c4#AQEBAQEBAQEBAQEBAQEBAQ==", url.URL)
+	assert.Equal(t, "http://mylocal.pastila.nl/?ffffffff/f7dfa9488fcbea210ff70e44d0566245#AQEBAQEBAQEBAQEBAQEBAQ==", url.URL)
 }
