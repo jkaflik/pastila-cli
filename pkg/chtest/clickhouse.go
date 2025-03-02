@@ -20,6 +20,10 @@ func EnsureClickHouseInstance(t *testing.T) string {
 		Image:        "clickhouse/clickhouse-server:latest",
 		ExposedPorts: []string{"8123/tcp"},
 		WaitingFor:   wait.ForHTTP("/"),
+		Env: map[string]string{
+			"CLICKHOUSE_USER":     "paste",
+			"CLICKHOUSE_PASSWORD": "paste",
+		},
 	}
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
@@ -34,7 +38,7 @@ func EnsureClickHouseInstance(t *testing.T) string {
 	url, err := container.Endpoint(context.Background(), "http")
 	t.Logf("ClickHouse URL: %s/play", url)
 	require.NoError(t, err)
-	url += "/?user=default"
+	url += "/?user=paste&password=paste"
 
 	EnsureClickHousePastila(t, url)
 
@@ -62,6 +66,10 @@ func ClickHouseQuery(t *testing.T, url string, query io.Reader) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	require.NoError(t, err)
+	t.Logf("ClickHouse response: %s", body)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 }
