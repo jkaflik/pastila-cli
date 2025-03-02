@@ -1,2 +1,13 @@
 *.iml
 .idea
+
+# GoReleaser
+dist/
+
+# Go binaries
+/pastila
+/pastila-cli
+
+# OS files
+.DS_Store
+Thumbs.db

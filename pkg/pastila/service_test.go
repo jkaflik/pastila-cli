@@ -2,11 +2,13 @@ package pastila
 
 import (
 	"bytes"
-	"github.com/jkaflik/pastila-cli/pkg/chtest"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"io"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/jkaflik/pastila-cli/pkg/chtest"
 )
 
 func TestReadEncrypted(t *testing.T) {
@@ -44,7 +46,7 @@ func TestReadInvalidUrlPath(t *testing.T) {
 	service := &Service{}
 	_, err := service.Read("https://some.url/invalid/path")
 
-	assert.ErrorIs(t, err, ErrInvalidUrl)
+	assert.ErrorIs(t, err, ErrInvalidURL)
 }
 
 func ensureLocalService(t *testing.T) *Service {

@@ -2,12 +2,13 @@ package chtest
 
 import (
 	"context"
-	"github.com/stretchr/testify/require"
 	"io"
 	"net/http"
 	"os"
 	"runtime"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -33,7 +34,7 @@ func EnsureClickHouseInstance(t *testing.T) string {
 	url, err := container.Endpoint(context.Background(), "http")
 	t.Logf("ClickHouse URL: %s/play", url)
 	require.NoError(t, err)
-	url = url + "/?user=default"
+	url += "/?user=default"
 
 	EnsureClickHousePastila(t, url)
 
@@ -54,11 +55,13 @@ func AssetPath(t *testing.T, path string) string {
 }
 
 func ClickHouseQuery(t *testing.T, url string, query io.Reader) {
-	req, err := http.NewRequest("POST", url, query)
+	ctx := context.Background()
+	req, err := http.NewRequestWithContext(ctx, "POST", url, query)
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "text/plain")
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
+	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 }

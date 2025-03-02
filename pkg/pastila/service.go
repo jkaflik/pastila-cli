@@ -2,16 +2,18 @@ package pastila
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/frifox/siphash128"
 	"io"
 	"net/http"
 	"regexp"
+
+	"github.com/frifox/siphash128"
 )
 
 var HTTPClient = http.DefaultClient
@@ -19,7 +21,7 @@ var DefaultClickHouseURL = "https://play.clickhouse.com/?user=paste"
 var chURL = "https://pastila.nl/"
 
 var (
-	ErrInvalidUrl  = fmt.Errorf("invalid pastila url")
+	ErrInvalidURL  = fmt.Errorf("invalid pastila url")
 	ErrNotFound    = fmt.Errorf("pastila not found")
 	ErrKeyRequired = fmt.Errorf("key is required for encrypted data")
 	ErrInvalidKey  = fmt.Errorf("invalid key")
@@ -53,7 +55,7 @@ type Service struct {
 func (s *Service) Read(url string) (*Paste, error) {
 	matches := QueryMatchRegex.FindStringSubmatch(url)
 	if matches == nil {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidUrl, url)
+		return nil, fmt.Errorf("%w: %s", ErrInvalidURL, url)
 	}
 
 	fingerprintHex := matches[1]
@@ -85,8 +87,8 @@ func (s *Service) Read(url string) (*Paste, error) {
 	defer res.Body.Close()
 
 	var row selectRow
-	if err := json.NewDecoder(res.Body).Decode(&row); err != nil {
-		if err == io.EOF {
+	if decodeErr := json.NewDecoder(res.Body).Decode(&row); decodeErr != nil {
+		if decodeErr == io.EOF {
 			return nil, fmt.Errorf("%w: %s", ErrNotFound, url)
 		}
 
@@ -141,8 +143,18 @@ func (s *Service) Read(url string) (*Paste, error) {
 	}, nil
 }
 
-const selectDataQuery = `SELECT toBool(is_encrypted) as is_encrypted, content FROM data WHERE fingerprint = reinterpretAsUInt32(unhex({fingerprintHex:String})) AND hash = reinterpretAsUInt128(unhex({hashHex:String})) ORDER BY time LIMIT 1 FORMAT JSONEachRow`
-const insertDataQuery = `INSERT INTO data (hash_hex, fingerprint_hex, prev_hash_hex, prev_fingerprint_hex, is_encrypted, content) FORMAT JSONEachRow`
+const selectDataQuery = `
+SELECT
+	toBool(is_encrypted) as is_encrypted,
+	content
+FROM data
+WHERE
+    fingerprint = reinterpretAsUInt32(unhex({fingerprintHex:String})) AND
+    hash = reinterpretAsUInt128(unhex({hashHex:String}))
+ORDER BY time LIMIT 1 FORMAT JSONEachRow`
+const insertDataQuery = `
+INSERT INTO data (hash_hex, fingerprint_hex, prev_hash_hex, prev_fingerprint_hex, is_encrypted, content)
+FORMAT JSONEachRow`
 
 type selectRow struct {
 	Encrypted bool   `json:"is_encrypted"`
@@ -192,7 +204,10 @@ func (s *Service) Write(input io.Reader, opt ...WriteOption) (*Paste, error) {
 
 	var isEncrypted bool
 	var content string
-	b, err := io.ReadAll(input)
+	b, readErr := io.ReadAll(input)
+	if readErr != nil {
+		return nil, fmt.Errorf("failed to read input: %w", readErr)
+	}
 
 	if opts.key != nil {
 		block, err := aes.NewCipher(opts.key)
@@ -275,7 +290,7 @@ func (s *Service) executeRequestWithParams(request *http.Request, params map[str
 
 	if resp.Header.Get("X-ClickHouse-Query-Id") == "" {
 		_ = resp.Body.Close()
-		return nil, fmt.Errorf("%w, missing query id", ErrInvalidUrl)
+		return nil, fmt.Errorf("%w, missing query id", ErrInvalidURL)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -290,12 +305,13 @@ func (s *Service) executeRequestWithParams(request *http.Request, params map[str
 }
 
 func (s *Service) clickHouseRequest(query string, body io.Reader) (*http.Request, error) {
-	clickHouseUrl := s.ClickHouseURL
-	if clickHouseUrl == "" {
-		clickHouseUrl = DefaultClickHouseURL
+	clickHouseURL := s.ClickHouseURL
+	if clickHouseURL == "" {
+		clickHouseURL = DefaultClickHouseURL
 	}
 
-	req, err := http.NewRequest(http.MethodPost, clickHouseUrl, body)
+	ctx := context.Background()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, clickHouseURL, body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ClickHouse request: %w", err)
 	}

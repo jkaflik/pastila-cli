@@ -1,0 +1,69 @@
+project_name: pastila-cli
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: pastila
+    main: ./cmd/pastila
+    binary: pastila
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - Merge pull request
+      - Merge branch
+
+brews:
+  - name: pastila
+    homepage: "https://github.com/jkaflik/pastila-cli"
+    description: "Command line client for pastila.nl"
+    folder: Formula
+    commit_author:
+      name: Kuba Kaflik
+      email: jakub@kaflik.pl
+    git:
+      url: 'git@github.com:jkaflik/homebrew-tap.git'
+      private_key: '{{ .Env.HOMEBREW_TAP_PRIVATEKEY }}'
+    test: |
+      system "#{bin}/pastila", "--help"
+    install: |
+      bin.install "pastila"
