@@ -56,13 +56,14 @@ brews:
   - name: pastila
     homepage: "https://github.com/jkaflik/pastila-cli"
     description: "Command line client for pastila.nl"
-    folder: Formula
+    directory: Formula
     commit_author:
       name: Kuba Kaflik
       email: jakub@kaflik.pl
-    git:
-      url: 'git@github.com:jkaflik/homebrew-tap.git'
-      private_key: '{{ .Env.HOMEBREW_TAP_PRIVATEKEY }}'
+    repository:
+      git:
+        url: 'git@github.com:jkaflik/homebrew-tap.git'
+        private_key: '{{ .Env.HOMEBREW_TAP_PRIVATEKEY }}'
     test: |
       system "#{bin}/pastila", "--help"
     install: |
