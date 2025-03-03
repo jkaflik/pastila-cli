@@ -19,30 +19,13 @@ Pastila CLI lets you easily read from and write to the pastila service from your
 The easiest way to install on macOS is through Homebrew:
 
 ```bash
-brew install jkaflik/tap/pastila
+brew tap jkaflik/tap
+brew install pastila-cli
 ```
 
 ### Linux and macOS (using pre-built binaries)
 
-Download the latest pre-built binary from the [releases page](https://github.com/jkaflik/pastila-cli/releases):
-
-```bash
-# For Linux (x86_64)
-curl -L https://github.com/jkaflik/pastila-cli/releases/latest/download/pastila-cli_Linux_x86_64.tar.gz | tar xz
-sudo mv pastila /usr/local/bin/
-
-# For Linux (ARM64)
-curl -L https://github.com/jkaflik/pastila-cli/releases/latest/download/pastila-cli_Linux_arm64.tar.gz | tar xz
-sudo mv pastila /usr/local/bin/
-
-# For macOS (x86_64)
-curl -L https://github.com/jkaflik/pastila-cli/releases/latest/download/pastila-cli_Darwin_x86_64.tar.gz | tar xz
-sudo mv pastila /usr/local/bin/
-
-# For macOS (ARM64/Apple Silicon)
-curl -L https://github.com/jkaflik/pastila-cli/releases/latest/download/pastila-cli_Darwin_arm64.tar.gz | tar xz
-sudo mv pastila /usr/local/bin/
-```
+Download the latest pre-built binary from the [releases page](https://github.com/jkaflik/pastila-cli/releases).
 
 ### Build from source
 

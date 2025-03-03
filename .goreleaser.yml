@@ -1,5 +1,5 @@
+version: 2
 project_name: pastila-cli
-
 before:
   hooks:
     - go mod tidy
@@ -22,25 +22,9 @@ builds:
       - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
 
 archives:
-  - format: tar.gz
-    name_template: >-
-      {{ .ProjectName }}_
-      {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}
-    format_overrides:
-      - goos: windows
-        format: zip
-    files:
+  - files:
       - README.md
       - LICENSE*
-
-checksum:
-  name_template: 'checksums.txt'
-
-snapshot:
-  name_template: "{{ incpatch .Version }}-next"
 
 changelog:
   sort: asc
@@ -61,6 +45,7 @@ brews:
       name: Kuba Kaflik
       email: jakub@kaflik.pl
     repository:
+      name: homebrew-tap
       git:
         url: 'git@github.com:jkaflik/homebrew-tap.git'
         private_key: '{{ .Env.HOMEBREW_TAP_PRIVATEKEY }}'
