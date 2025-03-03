@@ -20,7 +20,7 @@ The easiest way to install on macOS is through Homebrew:
 
 ```bash
 brew tap jkaflik/tap
-brew install pastila-cli
+brew install jkaflik/tap/pastila
 ```
 
 ### Linux and macOS (using pre-built binaries)
