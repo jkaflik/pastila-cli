@@ -50,6 +50,9 @@ type Service struct {
 
 	// ClickHouseURL is the URL of the ClickHouse service. Used to read and write data.
 	ClickHouseURL string
+
+	// Auth cookie for pastila with auth
+	AuthCookie string
 }
 
 func (s *Service) Read(url string) (*Paste, error) {
@@ -312,6 +315,14 @@ func (s *Service) clickHouseRequest(query string, body io.Reader) (*http.Request
 
 	ctx := context.Background()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, clickHouseURL, body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ClickHouse request: %w", err)
+	}
+
+	if s.AuthCookie != "" {
+		req.AddCookie(&http.Cookie{Name: "auth", Value: s.AuthCookie})
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ClickHouse request: %w", err)
 	}
