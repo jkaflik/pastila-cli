@@ -108,6 +108,7 @@ func main() {
 	service := pastila.Service{
 		PastilaURL:    os.Getenv("PASTILA_URL"),
 		ClickHouseURL: os.Getenv("PASTILA_CLICKHOUSE_URL"),
+		AuthCookie:    os.Getenv("PASTILA_COOKIE"),
 	}
 
 	if pasteURL != "" {
