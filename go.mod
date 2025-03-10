@@ -5,7 +5,7 @@ go 1.23.0
 require (
 	github.com/frifox/siphash128 v0.0.0-20240801215021-eb27e006a340
 	github.com/stretchr/testify v1.10.0
-	github.com/testcontainers/testcontainers-go v0.34.0
+	github.com/testcontainers/testcontainers-go v0.35.0
 )
 
 require (
