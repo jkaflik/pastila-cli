@@ -112,7 +112,7 @@ echo "Hello, world!" | pastila -plain
 ## Environment Variables
 
 - `PASTILA_URL`: Custom pastila service URL (default: https://pastila.nl/)
-- `PASTILA_CLICKHOUSE_URL`: Custom ClickHouse backend URL (default: https://play.clickhouse.com/?user=paste)
+- `PASTILA_CLICKHOUSE_URL`: Custom ClickHouse backend URL (default: https://uzg8q0g12h.eu-central-1.aws.clickhouse.cloud/?user=paste)
 - `EDITOR`: Editor to use with `-e` flag (default: vi)
 
 ## License
