@@ -17,7 +17,7 @@ import (
 )
 
 var HTTPClient = http.DefaultClient
-var DefaultClickHouseURL = "https://play.clickhouse.com/?user=paste"
+var DefaultClickHouseURL = "https://uzg8q0g12h.eu-central-1.aws.clickhouse.cloud/?user=paste"
 var chURL = "https://pastila.nl/"
 
 var (
