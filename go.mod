@@ -6,7 +6,7 @@ toolchain go1.24.1
 
 require (
 	github.com/frifox/siphash128 v0.0.0-20240801215021-eb27e006a340
-	github.com/stretchr/testify v1.10.0
+	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.36.0
 )
 
