@@ -150,11 +150,8 @@ const selectDataQuery = `
 SELECT
 	toBool(is_encrypted) as is_encrypted,
 	content
-FROM data
-WHERE
-    fingerprint = reinterpretAsUInt32(unhex({fingerprintHex:String})) AND
-    hash = reinterpretAsUInt128(unhex({hashHex:String}))
-ORDER BY time LIMIT 1 FORMAT JSONEachRow`
+FROM data_view(fingerprint = {fingerprintHex:String}, hash = {hashHex:String})
+FORMAT JSONEachRow`
 const insertDataQuery = `
 INSERT INTO data (hash_hex, fingerprint_hex, prev_hash_hex, prev_fingerprint_hex, is_encrypted, content)
 FORMAT JSONEachRow`

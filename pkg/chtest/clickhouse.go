@@ -50,6 +50,11 @@ func EnsureClickHousePastila(t *testing.T, url string) {
 	require.NoError(t, err)
 
 	ClickHouseQuery(t, url, pastilaSchema)
+
+	pastilaView, err := os.Open(AssetPath(t, "view.ddl.sql"))
+	require.NoError(t, err)
+
+	ClickHouseQuery(t, url, pastilaView)
 }
 
 func AssetPath(t *testing.T, path string) string {
