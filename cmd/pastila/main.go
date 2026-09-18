@@ -47,7 +47,10 @@ var printUsage = func() {
 	printf("\t[URL] can be a pastila URL or \"-\" to read from URL stdin.\n\nAvailable options:\n\n")
 	flag.PrintDefaults()
 	printf("\nAvailable commands:\n\n")
-	printf("  setup\tConfigure a custom Pastila deployment.\n  auth\tLogin, inspect or clear stored authentication.\n  doctor\tCheck configuration and endpoint connectivity.\n")
+	printf("  setup\tConfigure a custom Pastila deployment.\n")
+	printf("  auth\tLogin, inspect or clear stored authentication.\n")
+	printf("  doctor\tCheck configuration and endpoint connectivity.\n")
+	printf("  skill\tInstall the Pastila agent skill.\n")
 	printf("\nRead data goes into output, anything else goes into stderr.\n")
 	printf("When writing to pastila, URL will be printed to stdout.\n")
 }
@@ -62,6 +65,8 @@ func main() {
 			os.Exit(runAuth(os.Args[2:]))
 		case "doctor":
 			os.Exit(runDoctor(os.Args[2:]))
+		case "skill":
+			os.Exit(runSkill(os.Args[2:]))
 		}
 	}
 

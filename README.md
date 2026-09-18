@@ -13,6 +13,7 @@ Pastila CLI lets you easily read from and write to the pastila service from your
 - Support for editor integration
 - Pipe content to/from stdin/stdout
 - Custom pastila service deployment support
+- Install a portable agent skill for sharing artifacts with Pastila
 
 ## Installation
 
@@ -36,6 +37,27 @@ If you have Go installed, you can also build from source:
 ```bash
 go install github.com/jkaflik/pastila-cli/cmd/pastila@latest
 ```
+
+### Agent skill
+
+Install the bundled Pastila skill for OpenCode, Codex, Claude Code, and other
+compatible agents:
+
+```bash
+pastila skill install
+```
+
+The default `all` target installs the same skill in two global locations:
+
+- `~/.agents/skills/pastila/SKILL.md` for OpenCode, Codex, and portable Agent Skills clients
+- `~/.claude/skills/pastila/SKILL.md` for Claude Code
+
+Install only one variant with `pastila skill install -target portable` or
+`pastila skill install -target claude`. Rerun the command after upgrading Pastila
+to update the installed skill; changed copies are replaced automatically.
+
+The skill helps agents safely share files, Markdown, HTML reports, terminal logs,
+and Claude sessions while keeping Pastila's default encryption enabled.
 
 ## Usage
 
@@ -81,6 +103,7 @@ Available commands:
   setup    Configure a custom Pastila deployment.
   auth     Login, inspect or clear stored authentication.
   doctor   Check configuration and endpoint connectivity.
+  skill    Install the Pastila agent skill.
 
 Read data goes into output, anything else goes into stderr.
 When writing to pastila, URL will be printed to stdout.
