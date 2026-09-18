@@ -39,7 +39,7 @@ func normalizeURL(rawURL string) (string, error) {
 		return "", fmt.Errorf("failed to parse url: %w", err)
 	}
 
-	if u.Scheme == "" || u.Host == "" {
+	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Fragment != "" {
 		return "", fmt.Errorf("invalid url: %s", rawURL)
 	}
 
@@ -115,6 +115,9 @@ func resolveConfig(flagPastilaURL, flagClickHouseURL, flagCookie string) (*resol
 		return nil, fmt.Errorf("invalid clickhouse url: %w", err)
 	}
 	clickHouseURL = normalizedClickHouseURL
+	if pastilaURL != pastila.DefaultPastilaURL && clickHouseURLSource == sourceDefault {
+		return nil, fmt.Errorf("custom Pastila URL requires a ClickHouse endpoint; run pastila setup or set -clickhouse-url")
+	}
 
 	authCookie := strings.TrimSpace(flagCookie)
 	authCookieSource := ""
@@ -139,7 +142,7 @@ func resolveConfig(flagPastilaURL, flagClickHouseURL, flagCookie string) (*resol
 		PastilaURLSource:    pastilaURLSource,
 		ClickHouseURL:       clickHouseURL,
 		ClickHouseURLSource: clickHouseURLSource,
-		AuthCookie:          authCookie,
+		AuthCookie:          parseAuthCookieValue(authCookie),
 		AuthCookieSource:    authCookieSource,
 		ConfigPath:          configPath,
 	}, nil

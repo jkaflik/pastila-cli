@@ -299,7 +299,17 @@ func detectClickHouseEndpoint(
 
 	probes := make([]endpointProbe, 0, len(candidates))
 	for _, candidate := range candidates {
-		probe := probeQueryEndpoint(candidate, authCookie)
+		// Do not persist an automatically discovered cross-origin backend with
+		// a UI credential. An explicit backend override is required to trust it.
+		if authCookie != "" && explicitURL == "" && !sameHost(baseURL, candidate) {
+			probes = append(probes, endpointProbe{URL: candidate, Err: fmt.Errorf("cross-origin authenticated endpoint requires -clickhouse-url")})
+			continue
+		}
+		cookie := ""
+		if sameHost(baseURL, candidate) || (explicitURL != "" && sameHost(explicitURL, candidate)) {
+			cookie = authCookie
+		}
+		probe := probeQueryEndpoint(candidate, cookie)
 		probes = append(probes, probe)
 		if probe.OK {
 			return candidate, probes, nil
@@ -434,7 +444,7 @@ func fetchURLWithAuth(rawURL, authCookie string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("unexpected status %d while fetching %s", resp.StatusCode, rawURL)
@@ -529,7 +539,7 @@ func sameHost(firstURL, secondURL string) bool {
 		return false
 	}
 
-	return strings.EqualFold(first.Host, second.Host)
+	return strings.EqualFold(first.Scheme, second.Scheme) && strings.EqualFold(first.Host, second.Host)
 }
 
 func endpointVariants(rawURL string) ([]string, error) {
@@ -574,7 +584,7 @@ func probeLanding(rawURL, authCookie string) endpointProbe {
 	if err != nil {
 		return endpointProbe{URL: rawURL, Err: err}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	location := resp.Header.Get("Location")
 	probe := endpointProbe{
@@ -610,7 +620,7 @@ func probeQueryEndpoint(rawURL, authCookie string) endpointProbe {
 	if err != nil {
 		return endpointProbe{URL: rawURL, Err: err}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	bodySnippet := readBodySnippet(resp.Body)
 	location := resp.Header.Get("Location")

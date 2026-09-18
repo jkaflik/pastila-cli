@@ -77,7 +77,7 @@ func TestReadSendsAuthCookie(t *testing.T) {
 }
 
 func ensureLocalService(t *testing.T) *Service {
-	chURL = chtest.EnsureClickHouseInstance(t)
+	chURL := chtest.EnsureClickHouseInstance(t)
 	return &Service{ClickHouseURL: chURL, PastilaURL: "http://mylocal.pastila.nl/"}
 }
 
@@ -102,7 +102,7 @@ func TestWriteUnencrypted(t *testing.T) {
 	assert.Equal(t, expectedContent, string(actualContent))
 }
 
-func TestWriteEncryptedOwnKey(t *testing.T) {
+func TestWriteEncryptedWithKeyMaterial(t *testing.T) {
 	service := ensureLocalService(t)
 
 	key := bytes.Repeat([]byte{0x01}, 16)
@@ -110,5 +110,23 @@ func TestWriteEncryptedOwnKey(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotEmpty(t, url.QueryID)
-	assert.Equal(t, "http://mylocal.pastila.nl/?ffffffff/f7dfa9488fcbea210ff70e44d0566245#AQEBAQEBAQEBAQEBAQEBAQ==", url.URL)
+	parsed, err := parseLink(url.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "ffffffff", parsed.fingerprint)
+	assert.Regexp(t, `^[0-9a-f]{32}$`, parsed.hash)
+	assert.True(t, parsed.gcm)
+	assert.Len(t, parsed.key, 16)
+	assert.Equal(t, url.Key, parsed.key)
+	assert.NotEqual(t, key, url.Key)
+	repeated, err := service.Write(bytes.NewBufferString("Hello ClickHouse!"), WithKey(key))
+	require.NoError(t, err)
+	assert.NotEqual(t, url.Key, repeated.Key)
+	assert.NotEqual(t, url.Hash, repeated.Hash)
+	assert.NotEqual(t, url.URL, repeated.URL)
+	paste, err := service.Read(url.URL)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, paste.Close()) }()
+	content, err := io.ReadAll(paste)
+	require.NoError(t, err)
+	assert.Equal(t, "Hello ClickHouse!", string(content))
 }

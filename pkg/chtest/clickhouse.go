@@ -73,7 +73,7 @@ func ClickHouseQuery(t *testing.T, url string, query io.Reader) {
 	require.NoError(t, err)
 
 	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	require.NoError(t, resp.Body.Close())
 	require.NoError(t, err)
 	t.Logf("ClickHouse response: %s", body)
 	require.Equal(t, http.StatusOK, resp.StatusCode)

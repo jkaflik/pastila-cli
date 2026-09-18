@@ -2,6 +2,7 @@ package pastila
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -11,15 +12,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
+	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/frifox/siphash128"
 )
 
-var HTTPClient = http.DefaultClient
+var HTTPClient = &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
 var DefaultPastilaURL = "https://pastila.nl/"
 var DefaultClickHouseURL = "https://uzg8q0g12h.eu-central-1.aws.clickhouse.cloud/?user=paste"
-var chURL = DefaultPastilaURL
 
 var (
 	ErrInvalidURL  = fmt.Errorf("invalid pastila url")
@@ -27,8 +29,6 @@ var (
 	ErrKeyRequired = fmt.Errorf("key is required for encrypted data")
 	ErrInvalidKey  = fmt.Errorf("invalid key")
 )
-
-var QueryMatchRegex = regexp.MustCompile(`(?m)([a-f0-9]+)/([a-f0-9]+)(?:#(.+))?$`)
 
 type Paste struct {
 	io.ReadCloser
@@ -40,7 +40,11 @@ type Paste struct {
 	PreviousFingerprint []byte
 	PreviousHash        []byte
 
-	Key []byte
+	Key        []byte
+	Format     string
+	Compressed bool
+	NoWrap     bool
+	Sandbox    bool
 
 	QueryID string
 }
@@ -57,22 +61,12 @@ type Service struct {
 }
 
 func (s *Service) Read(url string) (*Paste, error) {
-	matches := QueryMatchRegex.FindStringSubmatch(url)
-	if matches == nil {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidURL, url)
+	l, err := parseLink(url)
+	if err != nil {
+		return nil, err
 	}
-
-	fingerprintHex := matches[1]
-	hashHex := matches[2]
-
-	var key []byte
-	if len(matches) == 4 {
-		var err error
-		key, err = base64.StdEncoding.DecodeString(matches[3])
-		if err != nil {
-			return nil, fmt.Errorf("%w, failed to base64 decode: %w", ErrInvalidKey, err)
-		}
-	}
+	fingerprintHex, hashHex := l.fingerprint, l.hash
+	key := l.key
 
 	req, err := s.clickHouseRequest(selectDataQuery, nil)
 	if err != nil {
@@ -88,15 +82,15 @@ func (s *Service) Read(url string) (*Paste, error) {
 		return nil, fmt.Errorf("failed to execute ClickHouse request: %w", err)
 	}
 
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 
 	var row selectRow
-	if decodeErr := json.NewDecoder(res.Body).Decode(&row); decodeErr != nil {
+	if decodeErr := json.NewDecoder(io.LimitReader(res.Body, 6*MaxContentSize+4096)).Decode(&row); decodeErr != nil {
 		if decodeErr == io.EOF {
 			return nil, fmt.Errorf("%w: %s", ErrNotFound, url)
 		}
 
-		return nil, fmt.Errorf("failed to decode ClickHouse response: %w", err)
+		return nil, fmt.Errorf("failed to decode ClickHouse response: %w", decodeErr)
 	}
 
 	fingerprint, err := hex.DecodeString(fingerprintHex)
@@ -108,49 +102,51 @@ func (s *Service) Read(url string) (*Paste, error) {
 		return nil, fmt.Errorf("failed to decode hash: %w", err)
 	}
 
-	// data is not encrypted, return as is
-	if !row.Encrypted {
-		return &Paste{
-			URL:         url,
-			Key:         key,
-			Fingerprint: fingerprint,
-			Hash:        hash,
-			ReadCloser:  io.NopCloser(bytes.NewBufferString(row.Content)),
-			QueryID:     res.Header.Get("X-ClickHouse-Query-Id"),
-		}, nil
+	plaintext := []byte(row.Content)
+	if row.Encrypted {
+		plaintext, err = decryptContent(row.Content, key, l.gcm)
+	} else {
+		key = nil
+		if l.compressed {
+			plaintext, err = base64.StdEncoding.DecodeString(row.Content)
+		}
 	}
-
-	if len(key) == 0 {
-		return nil, ErrKeyRequired
-	}
-
-	ciphertext, err := base64.StdEncoding.DecodeString(row.Content)
 	if err != nil {
-		return nil, fmt.Errorf("%w, failed to decode base64 ciphertext: %w", ErrInvalidKey, err)
+		return nil, err
 	}
-
-	block, err := aes.NewCipher(key)
+	if l.compressed {
+		plaintext, err = decompress(plaintext, MaxDecompressedSize)
+		if err != nil {
+			return nil, err
+		}
+	}
+	previousFingerprint, err := hex.DecodeString(row.PreviousFingerprint)
 	if err != nil {
-		return nil, fmt.Errorf("%w, failed to create AES cipher: %w", ErrInvalidKey, err)
+		return nil, fmt.Errorf("invalid previous fingerprint: %w", err)
 	}
-	iv := make([]byte, aes.BlockSize)
-	plaintext := make([]byte, len(ciphertext))
-	cipher.NewCTR(block, iv).XORKeyStream(plaintext, ciphertext)
+	previousHash, err := hex.DecodeString(row.PreviousHash)
+	if err != nil {
+		return nil, fmt.Errorf("invalid previous hash: %w", err)
+	}
 
 	return &Paste{
-		URL:         url,
-		Key:         key,
-		Fingerprint: fingerprint,
-		Hash:        hash,
-		ReadCloser:  io.NopCloser(bytes.NewReader(plaintext)),
-		QueryID:     res.Header.Get("X-ClickHouse-Query-Id"),
+		URL:                 url,
+		Key:                 key,
+		Fingerprint:         fingerprint,
+		Hash:                hash,
+		ReadCloser:          io.NopCloser(bytes.NewReader(plaintext)),
+		QueryID:             res.Header.Get("X-ClickHouse-Query-Id"),
+		PreviousFingerprint: previousFingerprint, PreviousHash: previousHash,
+		Format: l.format, Compressed: l.compressed, NoWrap: l.nowrap, Sandbox: l.sandbox,
 	}, nil
 }
 
 const selectDataQuery = `
 SELECT
 	toBool(is_encrypted) as is_encrypted,
-	content
+	content,
+	lower(hex(reinterpretAsFixedString(prev_hash))) AS prev_hash,
+	lower(hex(reinterpretAsFixedString(prev_fingerprint))) AS prev_fingerprint
 FROM data_view(fingerprint = {fingerprintHex:String}, hash = {hashHex:String})
 FORMAT JSONEachRow`
 const insertDataQuery = `
@@ -158,8 +154,10 @@ INSERT INTO data (hash_hex, fingerprint_hex, prev_hash_hex, prev_fingerprint_hex
 FORMAT JSONEachRow`
 
 type selectRow struct {
-	Encrypted bool   `json:"is_encrypted"`
-	Content   string `json:"content"`
+	Encrypted           bool   `json:"is_encrypted"`
+	Content             string `json:"content"`
+	PreviousHash        string `json:"prev_hash"`
+	PreviousFingerprint string `json:"prev_fingerprint"`
 }
 
 type insertRow struct {
@@ -172,9 +170,12 @@ type insertRow struct {
 }
 
 type writeOptions struct {
-	key                 []byte
-	previousFingerprint []byte
-	previousHash        []byte
+	key                         []byte
+	previousFingerprint         []byte
+	previousHash                []byte
+	encrypt                     bool
+	format                      string
+	compressed, nowrap, sandbox bool
 }
 
 type WriteOption func(*writeOptions)
@@ -182,8 +183,19 @@ type WriteOption func(*writeOptions)
 func WithKey(key []byte) WriteOption {
 	return func(o *writeOptions) {
 		o.key = key
+		o.encrypt = key != nil
 	}
 }
+
+func WithEncryption() WriteOption { return func(o *writeOptions) { o.encrypt = true } }
+func WithCompression(enabled bool) WriteOption {
+	return func(o *writeOptions) { o.compressed = enabled }
+}
+func WithFormat(format string) WriteOption {
+	return func(o *writeOptions) { o.format = strings.TrimPrefix(format, ".") }
+}
+func WithNoWrap(enabled bool) WriteOption  { return func(o *writeOptions) { o.nowrap = enabled } }
+func WithSandbox(enabled bool) WriteOption { return func(o *writeOptions) { o.sandbox = enabled } }
 
 func WithPreviousPaste(p *Paste) WriteOption {
 	return func(o *writeOptions) {
@@ -193,7 +205,8 @@ func WithPreviousPaste(p *Paste) WriteOption {
 
 		o.previousFingerprint = p.Fingerprint
 		o.previousHash = p.Hash
-		o.key = p.Key
+		o.encrypt = len(p.Key) > 0
+		o.format, o.compressed, o.nowrap, o.sandbox = p.Format, p.Compressed, p.NoWrap, p.Sandbox
 	}
 }
 
@@ -203,28 +216,63 @@ func (s *Service) Write(input io.Reader, opt ...WriteOption) (*Paste, error) {
 		o(opts)
 	}
 
-	var isEncrypted bool
+	if !validFormat(opts.format) {
+		return nil, fmt.Errorf("unsupported format %q", opts.format)
+	}
+	if opts.sandbox && opts.format != "html" && opts.format != "htm" {
+		return nil, fmt.Errorf("sandbox requires html or htm format")
+	}
+	var isEncrypted = opts.encrypt
 	var content string
-	b, readErr := io.ReadAll(input)
+	b, readErr := io.ReadAll(io.LimitReader(input, MaxDecompressedSize+1))
 	if readErr != nil {
 		return nil, fmt.Errorf("failed to read input: %w", readErr)
 	}
 
-	if opts.key != nil {
-		block, err := aes.NewCipher(opts.key)
+	if len(b) > MaxDecompressedSize {
+		return nil, fmt.Errorf("input exceeds %d bytes", MaxDecompressedSize)
+	}
+	if opts.compressed {
+		var compressed bytes.Buffer
+		w := gzip.NewWriter(&compressed)
+		if _, err := w.Write(b); err != nil {
+			return nil, err
+		}
+		if err := w.Close(); err != nil {
+			return nil, err
+		}
+		b = compressed.Bytes()
+	}
+	var actualKey []byte
+	if opts.encrypt {
+		var err error
+		actualKey, err = freshKey(opts.key)
+		if err != nil {
+			return nil, err
+		}
+		block, err := aes.NewCipher(actualKey)
 		if err != nil {
 			return nil, fmt.Errorf("%w, failed to create AES cipher: %w", ErrInvalidKey, err)
 		}
 
-		iv := make([]byte, aes.BlockSize)
-		stream := cipher.NewCTR(block, iv)
-		encrypted := make([]byte, len(b))
-		stream.XORKeyStream(encrypted, b)
+		aead, err := cipher.NewGCM(block)
+		if err != nil {
+			return nil, err
+		}
+		encrypted := aead.Seal(nil, actualKey[:aead.NonceSize()], b, nil)
 
 		content = base64.StdEncoding.EncodeToString(encrypted)
 		isEncrypted = true
+	} else if opts.compressed {
+		content = base64.StdEncoding.EncodeToString(b)
 	} else {
+		if !utf8.Valid(b) {
+			return nil, fmt.Errorf("plaintext must be UTF-8; use encryption or gzip for binary content")
+		}
 		content = string(b)
+	}
+	if len(content) >= MaxContentSize {
+		return nil, fmt.Errorf("stored content must be smaller than %d bytes", MaxContentSize)
 	}
 
 	hash := siphash128.SipHash128([]byte(content))
@@ -252,27 +300,44 @@ func (s *Service) Write(input io.Reader, opt ...WriteOption) (*Paste, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute ClickHouse request: %w", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 
 	var keyAppend string
-	if opts.key != nil {
-		keyAppend = "#" + base64.StdEncoding.EncodeToString(opts.key)
+	if actualKey != nil {
+		keyAppend = base64.StdEncoding.EncodeToString(actualKey) + "GCM"
+	}
+	if opts.nowrap {
+		keyAppend += "&nowrap"
+	}
+	if opts.sandbox {
+		keyAppend += "&sandbox"
+	}
+	if keyAppend != "" {
+		keyAppend = "#" + keyAppend
+	}
+	extension := ""
+	if opts.format != "" {
+		extension = "." + opts.format
+	}
+	if opts.compressed {
+		extension += ".gz"
 	}
 
 	pastilaURL := s.PastilaURL
 	if pastilaURL == "" {
-		pastilaURL = chURL
+		pastilaURL = DefaultPastilaURL
 	}
 
 	return &Paste{
-		URL: fmt.Sprintf("%s?%x/%x%s", pastilaURL, fingerprint, hash, keyAppend),
+		URL: fmt.Sprintf("%s?%x/%x%s%s", pastilaURL, fingerprint, hash, extension, keyAppend),
 
 		Hash:                hash[:],
 		Fingerprint:         fingerprint,
 		PreviousHash:        opts.previousHash,
 		PreviousFingerprint: opts.previousFingerprint,
 
-		Key:     opts.key,
+		Key:    actualKey,
+		Format: opts.format, Compressed: opts.compressed, NoWrap: opts.nowrap, Sandbox: opts.sandbox,
 		QueryID: res.Header.Get("X-ClickHouse-Query-Id"),
 	}, nil
 }
@@ -289,17 +354,16 @@ func (s *Service) executeRequestWithParams(request *http.Request, params map[str
 		return nil, fmt.Errorf("failed to execute ClickHouse request: %w", err)
 	}
 
-	if resp.Header.Get("X-ClickHouse-Query-Id") == "" {
-		_ = resp.Body.Close()
-		return nil, fmt.Errorf("%w, missing query id", ErrInvalidURL)
-	}
-
 	if resp.StatusCode != http.StatusOK {
 		responseBody := new(bytes.Buffer)
-		_, _ = responseBody.ReadFrom(resp.Body)
+		_, _ = responseBody.ReadFrom(io.LimitReader(resp.Body, 4096))
 		_ = resp.Body.Close()
 
 		return nil, fmt.Errorf("unexpected status code: %d, response: %s", resp.StatusCode, responseBody.String())
+	}
+	if resp.Header.Get("X-ClickHouse-Query-Id") == "" {
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("%w, missing ClickHouse query id (check endpoint or authentication)", ErrInvalidURL)
 	}
 
 	return resp, nil
@@ -319,10 +383,6 @@ func (s *Service) clickHouseRequest(query string, body io.Reader) (*http.Request
 
 	if s.AuthCookie != "" {
 		req.AddCookie(&http.Cookie{Name: "auth", Value: s.AuthCookie})
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to create ClickHouse request: %w", err)
 	}
 
 	urlQuery := req.URL.Query()
