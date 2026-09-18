@@ -3,6 +3,8 @@ package pastila
 import (
 	"bytes"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -47,6 +49,31 @@ func TestReadInvalidUrlPath(t *testing.T) {
 	_, err := service.Read("https://some.url/invalid/path")
 
 	assert.ErrorIs(t, err, ErrInvalidURL)
+}
+
+func TestReadSendsAuthCookie(t *testing.T) {
+	cookieValues := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		cookieValue := ""
+		cookie, err := request.Cookie("auth")
+		if err == nil {
+			cookieValue = cookie.Value
+		}
+		cookieValues <- cookieValue
+		response.Header().Set("X-ClickHouse-Query-Id", "read-query")
+		_, _ = io.WriteString(response, `{"is_encrypted":false,"content":"authenticated"}`+"\n")
+	}))
+	t.Cleanup(server.Close)
+
+	service := &Service{
+		ClickHouseURL: server.URL + "/query",
+		AuthCookie:    "test-cookie",
+	}
+	paste, err := service.Read("https://pastila.example.com/?ffffffff/14aa3e22cd6438df3a5808560fe40150")
+
+	require.NoError(t, err)
+	require.NoError(t, paste.Close())
+	assert.Equal(t, "test-cookie", <-cookieValues)
 }
 
 func ensureLocalService(t *testing.T) *Service {

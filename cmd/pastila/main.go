@@ -42,6 +42,8 @@ var printUsage = func() {
 	printf("Usage: %s [options] [URL]\n\n", os.Args[0])
 	printf("\t[URL] can be a pastila URL or \"-\" to read from URL stdin.\n\nAvailable options:\n\n")
 	flag.PrintDefaults()
+	printf("\nAvailable commands:\n\n")
+	printf("  setup\tConfigure a custom Pastila deployment.\n")
 	printf("\nRead data goes into output, anything else goes into stderr.\n")
 	printf("When writing to pastila, URL will be printed to stdout.\n")
 }
@@ -87,6 +89,10 @@ func stdinWithTimeout(timeout time.Duration) (io.Reader, error) {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "setup" {
+		os.Exit(runSetup(os.Args[2:]))
+	}
+
 	setupFlags()
 
 	stdin, err := stdinWithTimeout(time.Millisecond)
@@ -105,10 +111,16 @@ func main() {
 		}
 	}
 
+	resolved, err := resolveConfig("", "", "")
+	if err != nil {
+		printf("Failed to resolve configuration: %v\n", err)
+		os.Exit(1)
+	}
+
 	service := pastila.Service{
-		PastilaURL:    os.Getenv("PASTILA_URL"),
-		ClickHouseURL: os.Getenv("PASTILA_CLICKHOUSE_URL"),
-		AuthCookie:    os.Getenv("PASTILA_COOKIE"),
+		PastilaURL:    resolved.PastilaURL,
+		ClickHouseURL: resolved.ClickHouseURL,
+		AuthCookie:    resolved.AuthCookie,
 	}
 
 	if pasteURL != "" {

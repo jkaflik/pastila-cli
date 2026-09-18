@@ -58,11 +58,30 @@ Available options:
   -teeFlag
     	Write to output and to pastila. URL will be printed to stderr.
 
+Available commands:
+
+  setup    Configure a custom Pastila deployment.
+
 Read data goes into output, anything else goes into stderr.
 When writing to pastila, URL will be printed to stdout.
 ```
 
 ### Examples
+
+**Configuring a custom deployment:**
+```bash
+pastila setup
+```
+
+To skip the URL prompt:
+```bash
+pastila setup --url https://pastila.example.com/
+```
+
+If the deployment requires an auth cookie, setup opens the destination in your browser
+and prompts for the same cookie value accepted by `PASTILA_COOKIE`. The cookie is stored
+in the system keychain; the Pastila and ClickHouse URLs are stored in the user
+configuration directory.
 
 **Reading an encrypted paste:**
 ```bash
@@ -113,6 +132,7 @@ echo "Hello, world!" | pastila -plain
 
 - `PASTILA_URL`: Custom pastila service URL (default: https://pastila.nl/)
 - `PASTILA_CLICKHOUSE_URL`: Custom ClickHouse backend URL (default: https://uzg8q0g12h.eu-central-1.aws.clickhouse.cloud/?user=paste)
+- `PASTILA_COOKIE`: Auth cookie override. This takes precedence over the system keychain.
 - `EDITOR`: Editor to use with `-e` flag (default: vi)
 
 ## License

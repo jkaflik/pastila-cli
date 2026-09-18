@@ -17,8 +17,9 @@ import (
 )
 
 var HTTPClient = http.DefaultClient
+var DefaultPastilaURL = "https://pastila.nl/"
 var DefaultClickHouseURL = "https://uzg8q0g12h.eu-central-1.aws.clickhouse.cloud/?user=paste"
-var chURL = "https://pastila.nl/"
+var chURL = DefaultPastilaURL
 
 var (
 	ErrInvalidURL  = fmt.Errorf("invalid pastila url")
