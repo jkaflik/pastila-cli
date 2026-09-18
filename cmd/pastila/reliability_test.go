@@ -31,7 +31,7 @@ func TestWatchFileFinalEdits(t *testing.T) {
 	for _, value := range []string{"other", "", "longer content"} {
 		t.Run(value, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "paste")
-			require.NoError(t, os.WriteFile(path, []byte("first"), 0600))
+			require.NoError(t, os.WriteFile(path, []byte("first"), 0o600))
 			f, err := os.Open(path)
 			require.NoError(t, err)
 			defer func() { require.NoError(t, f.Close()) }()
@@ -44,7 +44,7 @@ func TestWatchFileFinalEdits(t *testing.T) {
 				observed = append(observed, string(data))
 			})
 			// Atomic replacement covers editors which save via rename.
-			require.NoError(t, os.WriteFile(path+".new", []byte(value), 0600))
+			require.NoError(t, os.WriteFile(path+".new", []byte(value), 0o600))
 			require.NoError(t, os.Rename(path+".new", path))
 			cancel()
 			<-done

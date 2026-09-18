@@ -63,7 +63,7 @@ func TestInstallOverwritesChangedSkillAndThenRemainsUnchanged(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, ".agents", "skills", Name, "SKILL.md")
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
-	require.NoError(t, os.WriteFile(path, []byte("custom skill\n"), 0o644))
+	require.NoError(t, os.WriteFile(path, []byte("custom skill\n"), 0o600))
 
 	results, err := Install(home, TargetPortable)
 

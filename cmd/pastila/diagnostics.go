@@ -5,12 +5,14 @@ import (
 	"flag"
 	"os"
 
-	"github.com/jkaflik/pastila-cli/pkg/auth"
 	"github.com/zalando/go-keyring"
+
+	"github.com/jkaflik/pastila-cli/pkg/auth"
 )
 
 var deleteAuthCookie = auth.DeleteCookie
 
+//nolint:funlen,gocyclo // Authentication actions have distinct validation and keychain outcomes.
 func runAuth(args []string) int {
 	if len(args) == 0 {
 		printf("Usage: pastila auth login|status|clear [-url URL] [-no-open]\n")
@@ -103,7 +105,9 @@ func runDoctor(args []string) int {
 		printf("%v\n", err)
 		return 1
 	}
-	printf("Config: %s\nPastila: %s (%s)\nClickHouse: %s (%s)\n", cfg.ConfigPath, cfg.PastilaURL, cfg.PastilaURLSource, cfg.ClickHouseURL, cfg.ClickHouseURLSource)
+	printf("Config: %s\n", cfg.ConfigPath)
+	printf("Pastila: %s (%s)\n", cfg.PastilaURL, cfg.PastilaURLSource)
+	printf("ClickHouse: %s (%s)\n", cfg.ClickHouseURL, cfg.ClickHouseURLSource)
 	if cfg.AuthCookie == "" {
 		printf("Authentication: none\n")
 	} else {

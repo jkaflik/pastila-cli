@@ -50,6 +50,16 @@ func runSkill(args []string) int {
 	}
 
 	results, installErr := skill.Install(home, target)
+	printSkillResults(results)
+	if installErr != nil {
+		printf("Failed to install Pastila skill: %v\n", installErr)
+		return 1
+	}
+
+	return 0
+}
+
+func printSkillResults(results []skill.Result) {
 	for _, result := range results {
 		switch result.Status {
 		case skill.StatusInstalled:
@@ -60,12 +70,6 @@ func runSkill(args []string) int {
 			printf("Pastila skill already up to date: %s\n", result.Path)
 		}
 	}
-	if installErr != nil {
-		printf("Failed to install Pastila skill: %v\n", installErr)
-		return 1
-	}
-
-	return 0
 }
 
 func printSkillUsage() {

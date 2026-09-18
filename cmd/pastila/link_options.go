@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+//nolint:gocritic,gocyclo // Format inference and explicit sandbox flags intentionally share validation in one place.
 func resolveLinkOptions(filename, currentFormat string, currentSandbox bool, fs *flag.FlagSet) (string, bool, error) {
 	explicit := make(map[string]string)
 	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = f.Value.String() })
@@ -34,13 +35,13 @@ func resolveLinkOptions(filename, currentFormat string, currentSandbox bool, fs 
 		sandbox = true
 	}
 	if value, ok := explicit["sandbox"]; ok {
-		sandbox = value == "true"
+		sandbox = value == trueFlagValue
 	}
-	if explicit["unsafe-html"] == "true" {
+	if explicit["unsafe-html"] == trueFlagValue {
 		if !isHTML {
 			return "", false, fmt.Errorf("-unsafe-html requires HTML format")
 		}
-		if explicit["sandbox"] == "true" {
+		if explicit["sandbox"] == trueFlagValue {
 			return "", false, fmt.Errorf("-unsafe-html and -sandbox cannot be combined")
 		}
 		sandbox = false

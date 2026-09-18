@@ -239,11 +239,6 @@ upload. **The URL contains the derived key, not the supplied material.** This
 intentionally replaces the old reusable-key behavior because Pastila derives
 the GCM nonce from the key. Keep the returned URL to read the paste.
 
-The Go service API defaults to plaintext unless `WithEncryption()` or
-`WithKey(...)` is supplied; the CLI defaults to encryption. `WithKey(nil)` selects
-plaintext. `WithPreviousPaste(...)` preserves format/compression/options and
-encryption status while rotating the encryption key.
-
 Stored content must be smaller than 50 MiB, including Base64 and encryption
 overhead. Input and decompressed output are bounded at 256 MiB minus 16 bytes,
 matching the browser's decompression limit. Plain, uncompressed content must be

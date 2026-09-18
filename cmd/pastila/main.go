@@ -23,6 +23,8 @@ var (
 	date    = "unknown"
 )
 
+const trueFlagValue = "true"
+
 var (
 	fileName                                         string
 	showSummary                                      bool
@@ -56,31 +58,36 @@ var printUsage = func() {
 }
 
 func main() {
+	os.Exit(runCLI())
+}
+
+//nolint:funlen,gocyclo // The CLI entrypoint coordinates independent command, read, write, and editor modes.
+func runCLI() int {
 	printWriter = os.Stderr
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "setup":
-			os.Exit(runSetup(os.Args[2:]))
+			return runSetup(os.Args[2:])
 		case "auth":
-			os.Exit(runAuth(os.Args[2:]))
+			return runAuth(os.Args[2:])
 		case "doctor":
-			os.Exit(runDoctor(os.Args[2:]))
+			return runDoctor(os.Args[2:])
 		case "skill":
-			os.Exit(runSkill(os.Args[2:]))
+			return runSkill(os.Args[2:])
 		}
 	}
 
 	setupFlags()
-	if flag.Lookup("version").Value.String() == "true" {
-		return
+	if flag.Lookup("version").Value.String() == trueFlagValue {
+		return 0
 	}
 	if flag.NArg() > 1 {
 		printf("expected at most one URL\n")
-		os.Exit(2)
+		return 2
 	}
 	if plain && key != "" {
 		printf("-plain and -key cannot be combined\n")
-		os.Exit(2)
+		return 2
 	}
 
 	var stdin io.Reader
@@ -94,14 +101,14 @@ func main() {
 		pasteURL, err = readURL(stdin)
 		if err != nil {
 			printf("%v\n", err)
-			os.Exit(1)
+			return 1
 		}
 	}
 
 	resolved, err := resolveConfig(baseURLFlag, backendFlag, cookieFlag)
 	if err != nil {
 		printf("Failed to resolve configuration: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	service := pastila.Service{
@@ -113,23 +120,23 @@ func main() {
 	if pasteURL != "" {
 		if readErr := readPaste(service, pasteURL); readErr != nil {
 			printf("%v\n", readErr)
-			os.Exit(1)
+			return 1
 		}
 
-		return
+		return 0
 	}
 
 	formatFlag, sandboxFlag, err = resolveLinkOptions(fileName, "", false, flag.CommandLine)
 	if err != nil {
 		printf("%v\n", err)
-		os.Exit(2)
+		return 2
 	}
 	var reader io.Reader
 	if fileName != "" && fileName != "-" {
 		reader, err = os.Open(fileName)
 		if err != nil {
 			printf("failed to open file %s: %v\n", fileName, err)
-			os.Exit(1)
+			return 1
 		}
 		defer func() { _ = reader.(*os.File).Close() }()
 	} else {
@@ -140,29 +147,37 @@ func main() {
 		if reader == nil {
 			reader = strings.NewReader("")
 		}
-		p := &pastila.Paste{ReadCloser: io.NopCloser(reader), Format: formatFlag, Compressed: compressFlag, NoWrap: nowrapFlag, Sandbox: sandboxFlag}
+		p := &pastila.Paste{
+			ReadCloser: io.NopCloser(reader),
+			Format:     formatFlag,
+			Compressed: compressFlag,
+			NoWrap:     nowrapFlag,
+			Sandbox:    sandboxFlag,
+		}
 		if !plain {
 			p.Key, err = generateRandomKey()
 			if err != nil {
 				printf("%v\n", err)
-				os.Exit(1)
+				return 1
 			}
 		}
-		if _, err := editPaste(service, p); err != nil {
+		if err := editPaste(service, p); err != nil {
 			printf("%v\n", err)
-			os.Exit(1)
+			return 1
 		}
-		return
+		return 0
 	}
 	if reader == nil {
 		printUsage()
-		os.Exit(1)
+		return 1
 	}
 
 	if writeErr := writePaste(service, reader); writeErr != nil {
 		printf("%v\n", writeErr)
-		os.Exit(1)
+		return 1
 	}
+
+	return 0
 }
 
 func writePaste(service pastila.Service, contentReader io.Reader) error {
@@ -192,7 +207,14 @@ func writePaste(service pastila.Service, contentReader io.Reader) error {
 		}
 	}
 
-	result, err := service.Write(reader, pastila.WithKey(k), pastila.WithCompression(compressFlag), pastila.WithFormat(formatFlag), pastila.WithNoWrap(nowrapFlag), pastila.WithSandbox(sandboxFlag))
+	result, err := service.Write(
+		reader,
+		pastila.WithKey(k),
+		pastila.WithCompression(compressFlag),
+		pastila.WithFormat(formatFlag),
+		pastila.WithNoWrap(nowrapFlag),
+		pastila.WithSandbox(sandboxFlag),
+	)
 	if err != nil {
 		return fmt.Errorf("failed to write paste: %w", err)
 	}
@@ -268,7 +290,12 @@ func setupFlags() {
 		"Print version information and exit",
 	)
 	flag.BoolVar(&compressFlag, "gzip", false, "Compress content with gzip before uploading")
-	flag.StringVar(&formatFlag, "format", "auto", "Link format: auto (infer from filename), md, markdown, html, htm, link, png, claude.jsonl, terminal; use -format= for plain view")
+	flag.StringVar(
+		&formatFlag,
+		"format",
+		"auto",
+		"Link format: auto (infer from filename), md, markdown, html, htm, link, png, claude.jsonl, terminal; use -format= for plain view",
+	)
 	flag.BoolVar(&nowrapFlag, "nowrap", false, "Disable browser text wrapping")
 	flag.BoolVar(&sandboxFlag, "sandbox", false, "Render HTML in the browser sandbox (default for HTML)")
 	flag.Bool("unsafe-html", false, "Disable the default HTML sandbox")
@@ -278,7 +305,7 @@ func setupFlags() {
 	flag.Usage = printUsage
 	flag.Parse()
 
-	if versionFlag := flag.Lookup("version"); versionFlag != nil && versionFlag.Value.String() == "true" {
+	if versionFlag := flag.Lookup("version"); versionFlag != nil && versionFlag.Value.String() == trueFlagValue {
 		fmt.Printf("Pastila CLI v%s (%s) - %s\n", version, commit, date)
 		return
 	}
@@ -295,7 +322,7 @@ func readPaste(service pastila.Service, urlToRead string) error {
 	}
 
 	if launchEditorFlag {
-		if _, editErr := editPaste(service, pasteRes); editErr != nil {
+		if editErr := editPaste(service, pasteRes); editErr != nil {
 			return fmt.Errorf("failed to edit paste: %w", editErr)
 		}
 		return nil
@@ -308,14 +335,15 @@ func readPaste(service pastila.Service, urlToRead string) error {
 	return nil
 }
 
-func editPaste(service pastila.Service, paste *pastila.Paste) (*pastila.Paste, error) {
+//nolint:funlen,gocyclo // Editing coordinates the editor process, file watcher, and optional upload overrides.
+func editPaste(service pastila.Service, paste *pastila.Paste) error {
 	format, sandbox, err := resolveLinkOptions("", paste.Format, paste.Sandbox, flag.CommandLine)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	editorFile, fileErr := pasteToTemp(paste)
 	if fileErr != nil {
-		return nil, fileErr
+		return fileErr
 	}
 
 	defer func() {
@@ -328,11 +356,11 @@ func editPaste(service pastila.Service, paste *pastila.Paste) (*pastila.Paste, e
 		}
 	}()
 
-	// #nosec G204 -- This is intended behavior to launch the user's editor
 	editor := strings.Fields(getEditor())
 	if len(editor) == 0 {
-		return nil, fmt.Errorf("EDITOR is empty")
+		return fmt.Errorf("EDITOR is empty")
 	}
+	// #nosec G204 -- This is intended behavior to launch the user's configured editor.
 	cmd := exec.Command(editor[0], append(editor[1:], editorFile.Name())...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -364,7 +392,7 @@ func editPaste(service pastila.Service, paste *pastila.Paste) (*pastila.Paste, e
 		})
 		if key != "" {
 			seed := []byte(key)
-			if _, err := os.Stat(key); err == nil {
+			if _, statErr := os.Stat(key); statErr == nil {
 				seed, err = os.ReadFile(key)
 				if err != nil {
 					uploadErr = err
@@ -386,7 +414,7 @@ func editPaste(service pastila.Service, paste *pastila.Paste) (*pastila.Paste, e
 	if startErr := cmd.Start(); startErr != nil {
 		cancelFileWatch()
 		<-fileWatchDone
-		return nil, fmt.Errorf("failed to start editor: %w", startErr)
+		return fmt.Errorf("failed to start editor: %w", startErr)
 	}
 	waitErr := cmd.Wait()
 	cancelFileWatch()
@@ -398,12 +426,12 @@ func editPaste(service pastila.Service, paste *pastila.Paste) (*pastila.Paste, e
 		_, _ = fmt.Fprintln(os.Stdout, url)
 	}
 	if waitErr != nil {
-		return paste, fmt.Errorf("editor failed: %w", waitErr)
+		return fmt.Errorf("editor failed: %w", waitErr)
 	}
 	if uploadErr != nil {
-		return paste, fmt.Errorf("failed to upload edit: %w", uploadErr)
+		return fmt.Errorf("failed to upload edit: %w", uploadErr)
 	}
-	return paste, nil
+	return nil
 }
 
 func pasteToTemp(paste *pastila.Paste) (*os.File, error) {

@@ -19,7 +19,12 @@ import (
 	"github.com/frifox/siphash128"
 )
 
-var HTTPClient = &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
+var HTTPClient = &http.Client{
+	Timeout: 30 * time.Second,
+	CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
 var DefaultPastilaURL = "https://pastila.nl/"
 var DefaultClickHouseURL = "https://uzg8q0g12h.eu-central-1.aws.clickhouse.cloud/?user=paste"
 
@@ -210,6 +215,7 @@ func WithPreviousPaste(p *Paste) WriteOption {
 	}
 }
 
+//nolint:funlen,gocyclo // Writing validates and transforms several independent format, compression, and encryption options.
 func (s *Service) Write(input io.Reader, opt ...WriteOption) (*Paste, error) {
 	opts := &writeOptions{}
 	for _, o := range opt {
@@ -244,7 +250,8 @@ func (s *Service) Write(input io.Reader, opt ...WriteOption) (*Paste, error) {
 		b = compressed.Bytes()
 	}
 	var actualKey []byte
-	if opts.encrypt {
+	switch {
+	case opts.encrypt:
 		var err error
 		actualKey, err = freshKey(opts.key)
 		if err != nil {
@@ -263,9 +270,9 @@ func (s *Service) Write(input io.Reader, opt ...WriteOption) (*Paste, error) {
 
 		content = base64.StdEncoding.EncodeToString(encrypted)
 		isEncrypted = true
-	} else if opts.compressed {
+	case opts.compressed:
 		content = base64.StdEncoding.EncodeToString(b)
-	} else {
+	default:
 		if !utf8.Valid(b) {
 			return nil, fmt.Errorf("plaintext must be UTF-8; use encryption or gzip for binary content")
 		}

@@ -19,7 +19,10 @@ import (
 const MaxContentSize = 50 * 1024 * 1024
 const MaxDecompressedSize = 256*1024*1024 - 16
 
-var pasteQuery = regexp.MustCompile(`^([a-f0-9]{8})/([a-f0-9]{32})(\.md|\.markdown|\.html?|\.link|\.png|\.claude\.jsonl|\.terminal)?(\.gz)?$`)
+var pasteQuery = regexp.MustCompile(
+	`^([a-f0-9]{8})/([a-f0-9]{32})` +
+		`(\.md|\.markdown|\.html?|\.link|\.png|\.claude\.jsonl|\.terminal)?(\.gz)?$`,
+)
 
 type link struct {
 	fingerprint, hash                string
@@ -28,6 +31,7 @@ type link struct {
 	key                              []byte
 }
 
+//nolint:gocyclo // Link parsing validates each optional URL component and rendering option.
 func parseLink(raw string) (*link, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {

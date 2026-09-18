@@ -96,8 +96,8 @@ func installFile(path string) (Status, error) {
 	}
 
 	directory := filepath.Dir(path)
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		return "", fmt.Errorf("failed to create skill directory: %w", err)
+	if mkdirErr := os.MkdirAll(directory, 0o755); mkdirErr != nil {
+		return "", fmt.Errorf("failed to create skill directory: %w", mkdirErr)
 	}
 
 	temporary, err := os.CreateTemp(directory, ".SKILL.md-*")
